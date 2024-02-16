@@ -2,13 +2,10 @@ provider "aws" {
   region = "us-east-1"
 }
 
-resource "aws_instance" "web-server" {
-  ami           = "ami-0c7217cdde317cfec"
+resource "aws_launch_configuration" "web-server" {
+  image_id           = "ami-0c7217cdde317cfec"
   instance_type = "t2.micro"
 
-  tags = {
-    Name = "web-server"
-  }
 
   user_data = <<-EOF
               #!/bin/bash
@@ -16,9 +13,14 @@ resource "aws_instance" "web-server" {
               nohup busybox httpd -f -p ${var.server_port} &
               EOF
 
-  user_data_replace_on_change = true
 
-  vpc_security_group_ids = [aws_security_group.instance.id]
+  security_groups =  [aws_security_group.instance.id]
+
+
+  # Required when using a launch configuration with an auto scaling group.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_security_group" "instance" {
@@ -38,7 +40,28 @@ variable "server_port" {
   default     = 8080
 }
 
-output "public_ip" {
-  value       = aws_instance.web-server.public_ip
-  description = "The public IP address of the web server"
+
+resource "aws_autoscaling_group" "example" {
+  launch_configuration = aws_launch_configuration.web-server.name
+  vpc_zone_identifier  = data.aws_subnets.default.ids
+
+  min_size = 2
+  max_size = 10
+
+  tag {
+    key                 = "Name"
+    value               = "terraform-asg-example"
+    propagate_at_launch = true
+  }
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
 }
